@@ -1,12 +1,19 @@
-import express from 'express';
+import express from "express";
+import {
+  createProject,
+  deleteProjects,
+  getAllProjects,
+  getProjectById,
+  updateProject,
+} from "../controllers/project.js";
+import { authenticate, requireRole } from "../middleware/auth.js";
 
-import { createProject, deleteProjects, getAllProjects } from "../controllers/project.js";
+const router = express.Router();
 
-const router= express.Router();
-
-router.post('/createProject',createProject);
-router.get('/getProjects',getAllProjects);
-router.delete('/delete/:id',deleteProjects);
-// router.delete('/deleteProjects',deleteProjects)
+router.post("/createProject", authenticate, requireRole("admin"), createProject);
+router.get("/getProjects", authenticate, getAllProjects);
+router.get("/getProject/:id", authenticate, getProjectById);
+router.put("/update/:id", authenticate, requireRole("admin"), updateProject);
+router.delete("/delete/:id", authenticate, requireRole("admin"), deleteProjects);
 
 export default router;

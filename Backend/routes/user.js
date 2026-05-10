@@ -1,14 +1,28 @@
-import express from 'express';
+import express from "express";
+import {
+  register,
+  publicRegister,
+  deleteUser,
+  updateUser,
+  getAllUsers,
+  login,
+  find,
+} from "../controllers/authController.js";
+import { authenticate, requireRole } from "../middleware/auth.js";
 
-import { register, deleteUser, updateUser, getAllUsers, login, find } from "../controllers/authController.js";
+const router = express.Router();
 
-const router= express.Router();
+// ── Public (no auth needed) ───────────────────────────────────────
+router.post("/login", login);
+router.post("/register", publicRegister);       // self-signup → always "member" role
 
-router.post('/register',register);
-router.delete('/deleteUser/:id',deleteUser);
-router.put('/updateUser/:id',updateUser);
-router.get('/getUsers',getAllUsers);
-router.get('/login',login);
-router.get('/find/:id',find);
+// ── Admin: create user with any role ─────────────────────────────
+router.post("/createUser", authenticate, requireRole("admin"), register);
+
+// ── Protected ─────────────────────────────────────────────────────
+router.get("/getUsers", authenticate, getAllUsers);
+router.get("/find/:id", authenticate, find);
+router.put("/updateUser/:id", authenticate, updateUser);
+router.delete("/deleteUser/:id", authenticate, requireRole("admin"), deleteUser);
 
 export default router;

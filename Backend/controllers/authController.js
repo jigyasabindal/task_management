@@ -1,189 +1,183 @@
-import User from "../db/Users.js";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import activity_log from "../db/activity_log.js";
+import dotenv from "dotenv";
+import User from "../models/User.js";
+import ActivityLog from "../models/ActivityLog.js";
+import { sendEmail } from "../config/mailer.js";
+dotenv.config();
 
-export const register = (req,res)=>{
-    const authHeader = req.headers.authorization;
-    if(!authHeader){
-        return res.status(401).json({
-            message: "Authorization header missing. Please login first."
-        })
-    }
-        
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token,"secretkey");
+const SECRET = process.env.JWT_SECRET || "supersecretjwtkey2024";
 
-    const user = {
-        name: req.body.name,
-        email: req.body.email,
-        password: req.body.password,
-        role: req.body.role
-    }
-    if(decoded.role === "admin"){
-    User.Register(user, (err,result) => {
-        if(err) {
-            return res.status(500).json({
-                message: "Error creating task",
-                error: err
-            })
-        }
-        activity_log.create(decoded.id,`User Registered: ${user.name}`,(err,results)=>{
-            if(err){
-                console.log("Log error:",err);
-            }
-        });
-        return res.status(201).json({
-            message: "User registered",
-            userid: result.insertId
-        });
-      
-    })
-}
-else{
+// POST /user/register  — PUBLIC self-signup (role always "member")
+export const publicRegister = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password)
+      return res.status(400).json({ message: "Name, email and password are required." });
+
+    const existing = await User.findOne({ where: { email } });
+    if (existing) return res.status(400).json({ message: "Email already registered." });
+
+    // Force role to "member" — public users cannot self-assign admin/manager
+    const user = await User.create({ name, email, password, role: "member" });
+
+    await ActivityLog.create({
+      user_id: user.id,
+      action: `New user self-registered: ${user.name}`,
+    });
+
+    // Send welcome email (non-blocking — don't crash if it fails)
+    sendEmail(
+      email,
+      "Welcome to TaskFlowSpirit 🎉",
+      `<h2>Hi ${name},</h2>
+       <p>Your account has been created successfully.</p>
+       <p><b>Email:</b> ${email}</p>
+       <p><b>Role:</b> member</p>
+       <p>Login at <a href="http://localhost:5173/login">TaskFlowSpirit</a></p>`
+    ).catch(() => {});
+
+    // Return token so frontend can auto-login after signup
+    const token = jwt.sign(
+      { id: user.id, name: user.name, role: user.role, email: user.email },
+      SECRET,
+      { expiresIn: "7d" }
+    );
+
     return res.status(201).json({
-            message: "Access denied Only admin can register a user!!!",
-        });
-}
-    
-}
+      message: "User registered successfully",
+      token,
+      user: { id: user.id, name: user.name, role: user.role, email: user.email },
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Error creating user", error: err.message });
+  }
+};
 
-export const deleteUser = (req,res)=>{
-    const authHeader = req.headers.authorization;
-    if(!authHeader){
-        return res.status(401).json({
-            message: "Authorization header missing. Please login first."
-        })
-    }
-        
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token,"secretkey");
+// POST /user/createUser  — ADMIN only (can assign any role)
+export const register = async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
 
+    if (!name || !email || !password || !role)
+      return res.status(400).json({ message: "All fields including role are required." });
 
-    const id= req.params.id;
+    const existing = await User.findOne({ where: { email } });
+    if (existing) return res.status(400).json({ message: "Email already registered." });
 
-    User.deleteUser(id, (err,result) =>{
-        if(err){
-            return res.status(500).json({
-                message: "Error deleting User",
-                error: err
-            });
-        }
-        activity_log.create(decoded.id,`User Deleted: ${id}`,(err,results)=>{
-            if(err){
-                console.log("Log error:",err);
-            }
-        });
-        res.json({
-            message: "User deleted successfully"
-        });
-    })
-}
+    const user = await User.create({ name, email, password, role });
 
-export const updateUser = (req,res) => {
-    const authHeader = req.headers.authorization;
-    if(!authHeader){
-        return res.status(401).json({
-            message: "Authorization header missing. Please login first."
-        })
-    }
-        
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token,"secretkey");
+    await ActivityLog.create({
+      user_id: req.user.id,
+      action: `Admin registered new user: ${user.name} (${user.role})`,
+    });
 
-    const id=req.params.id;
-    const user={
-        name: req.body.name,
-        email: req.body.email,
-        password: req.body.password,
-        role: req.body.role
-    };
-    User.updateUser(id, user, (err,result) => {
-        if(err) {
-            return res.status(500).json({
-                message: "Error Updating User",
-                error: err
-            });
-        }
-        activity_log.create(decoded.id,`User Updated: ${user.name}`,(err,results)=>{
-            if(err){
-                console.log("Log error:",err);
-            }
-        });
-        res.status(200).json({
-            message: "User updated successfully"
-        });
-    })
-}
+    sendEmail(
+      email,
+      "Welcome to TaskFlowSpirit 🎉",
+      `<h2>Hi ${name},</h2>
+       <p>Your account has been created by an admin.</p>
+       <p><b>Email:</b> ${email}</p>
+       <p><b>Role:</b> ${role}</p>
+       <p>Login at <a href="http://localhost:5173/login">TaskFlowSpirit</a></p>`
+    ).catch(() => {});
 
-export const getAllUsers = (req,res) => {
-    User.getAllUsers((err,results)=>{
-        if(err){
-            return res.status(500).json({
-                message:"Error fetching the data",
-                error:err
-            });
-        }
-        else
-        res.status(200).json({
-            message: "Users fetched successfully",
-            data: results
-        });
-    })
-}
+    return res.status(201).json({ message: "User registered successfully", userId: user.id });
+  } catch (err) {
+    return res.status(500).json({ message: "Error creating user", error: err.message });
+  }
+};
 
-export const login = (req,res) => {
-    const user= {
-        email: req.body.email,
-        password: req.body.password
-    };
-    
-    User.login(user,(err,result)=> {
-        const token = jwt.sign(
-            { id: result[0].id, name: result[0].name, role: result[0].role },"secretkey",
-            { expiresIn: "7d" }
-        );
-        if(err) {
-            return res.status(404).json({
-                message: "No User Found! Try Again!!!"
-            })
-        }
-        if(result.length === 0){
-            return res.status(404).json({
-                message:"No User Found"
-            })
-        }
-        activity_log.create(result[0].id,"User Login",(err,results)=>{
-            if(err){
-                console.log("Log error:",err);
-            }
-        });
-        res.status(200).json({
-            message: "LOGIN SUCCESSFUL",
-            name: result[0].name,
-            token: token
-        })
-    })
-}
+// POST /user/login
+export const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ where: { email } });
 
-export const find = (req,res) => {
-    const id= req.params.id;
-    User.find( id, (err,result)=> {
-        if(err) {
-            res.status(404).json({
-                message: "Error finding the user!!!",
-                error: err
-            })
-        }
+    if (!user) return res.status(404).json({ message: "Invalid email or password." });
 
-        if(result.length == 0){
-            res.status(404).json({
-                message: "User not found!!!"
-            });
-        }
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(401).json({ message: "Invalid email or password." });
 
-        res.status(200).json({
-            message: "User fetched",
-            data: result
-        });
-    })
-}
+    const token = jwt.sign(
+      { id: user.id, name: user.name, role: user.role, email: user.email },
+      SECRET,
+      { expiresIn: "7d" }
+    );
+
+    await ActivityLog.create({ user_id: user.id, action: "User logged in" });
+
+    return res.status(200).json({
+      message: "Login successful",
+      token,
+      user: { id: user.id, name: user.name, role: user.role, email: user.email },
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Login error", error: err.message });
+  }
+};
+
+// DELETE /user/deleteUser/:id  — admin only
+export const deleteUser = async (req, res) => {
+  try {
+    const deleted = await User.destroy({ where: { id: req.params.id } });
+    if (!deleted) return res.status(404).json({ message: "User not found" });
+
+    await ActivityLog.create({
+      user_id: req.user.id,
+      action: `Admin deleted user id=${req.params.id}`,
+    });
+
+    return res.json({ message: "User deleted successfully" });
+  } catch (err) {
+    return res.status(500).json({ message: "Error deleting user", error: err.message });
+  }
+};
+
+// PUT /user/updateUser/:id
+export const updateUser = async (req, res) => {
+  try {
+    const updateData = { name: req.body.name, email: req.body.email, role: req.body.role };
+    if (req.body.password) updateData.password = req.body.password;
+
+    const [updated] = await User.update(updateData, {
+      where: { id: req.params.id },
+      individualHooks: true,
+    });
+
+    if (!updated) return res.status(404).json({ message: "User not found" });
+
+    await ActivityLog.create({
+      user_id: req.user.id,
+      action: `User updated profile id=${req.params.id}`,
+    });
+
+    return res.status(200).json({ message: "User updated successfully" });
+  } catch (err) {
+    return res.status(500).json({ message: "Error updating user", error: err.message });
+  }
+};
+
+// GET /user/getUsers
+export const getAllUsers = async (req, res) => {
+  try {
+    const users = await User.findAll({ attributes: { exclude: ["password"] } });
+    return res.status(200).json({ message: "Users fetched successfully", data: users });
+  } catch (err) {
+    return res.status(500).json({ message: "Error fetching users", error: err.message });
+  }
+};
+
+// GET /user/find/:id
+export const find = async (req, res) => {
+  try {
+    const user = await User.findByPk(req.params.id, {
+      attributes: { exclude: ["password"] },
+    });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    return res.status(200).json({ message: "User fetched", data: user });
+  } catch (err) {
+    return res.status(500).json({ message: "Error finding user", error: err.message });
+  }
+};

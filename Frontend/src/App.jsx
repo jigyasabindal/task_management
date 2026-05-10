@@ -8,23 +8,12 @@ import AllUsers from "./pages/AllUsers";
 import UpdateUser from "./pages/UpdateUser";
 import Project from "./pages/Project";
 import Task from "./pages/Task";
-import CreateTasks from "./pages/CreateTasks";
-
-import axios from "axios";
-import { useEffect } from "react";
+import CreateTask from "./pages/CreateTask";
+import TaskDetail from "./pages/TaskDetail";
+import Notifications from "./pages/Notifications";
+import ActivityLogs from "./pages/ActivityLogs";
 
 export default function App() {
-
-  useEffect(() => {
-    axios.get("http://localhost:3000/api/test")
-      .then((res) => {
-        console.log(res.data);
-      })
-      .catch((err) => {
-        console.log(err);
-      });
-  }, []);
-
   return (
     <AuthProvider>
       <BrowserRouter>
@@ -38,7 +27,10 @@ export default function App() {
           <Route path="/update-user/:id" element={<UpdateUser />} />
           <Route path="/projects" element={<Project />} />
           <Route path="/tasks" element={<Task />} />
-          <Route path="/create-task" element={<CreateTasks />} />
+          <Route path="/create-task" element={<CreateTask />} />
+          <Route path="/task/:id" element={<TaskDetail />} />
+          <Route path="/notifications" element={<Notifications />} />
+          <Route path="/activity-logs" element={<ActivityLogs />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

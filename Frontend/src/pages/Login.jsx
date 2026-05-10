@@ -8,12 +8,14 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const navigate = useNavigate();
   const { login } = useAuth();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setError("");
     try {
       const res = await fetch("http://localhost:3000/user/login", {
         method: "POST",
@@ -22,26 +24,31 @@ export default function Login() {
       });
       const data = await res.json();
       if (res.ok) {
-        login(data.token, data.name, data.role, data.id);
+        // Backend returns { token, user: { id, name, role, email } }
+        login(data.token, data.user.name, data.user.role, data.user.id);
         navigate("/dashboard");
       } else {
-        alert(data.message || "Login failed");
+        setError(data.message || "Login failed");
       }
     } catch (err) {
-      console.log(err);
-      alert("Cannot connect to server");
+      setError("Cannot connect to server. Is the backend running?");
     }
     setLoading(false);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-600 via-gray-800 to-slate-900 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-800 via-gray-900 to-slate-900 flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl rounded-2xl p-8">
-
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white">Welcome Back</h1>
           <p className="text-gray-300 mt-2 text-sm">Login to your account</p>
         </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-300 text-sm text-center">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
@@ -84,7 +91,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-semibold"
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white py-3 rounded-xl font-semibold transition-colors"
           >
             {loading ? "Signing in..." : "Sign In"}
           </button>

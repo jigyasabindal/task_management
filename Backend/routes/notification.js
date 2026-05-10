@@ -1,8 +1,17 @@
-import express from 'express';
-import { create } from "../controllers/Notification.js";
+import express from "express";
+import {
+  getMyNotifications,
+  markAsRead,
+  markAllAsRead,
+  getOverdueAlerts,
+} from "../controllers/Notification.js";
+import { authenticate } from "../middleware/auth.js";
 
-const router= express.Router();
+const router = express.Router();
 
-router.get('/',create);
+router.get("/", authenticate, getMyNotifications);
+router.get("/overdue", authenticate, getOverdueAlerts);
+router.put("/read/:id", authenticate, markAsRead);
+router.put("/readAll", authenticate, markAllAsRead);
 
 export default router;

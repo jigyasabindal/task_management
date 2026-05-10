@@ -1,166 +1,177 @@
-import task from "../db/task.js";
-import User from "../db/Users.js";
-import activity_log from "../db/activity_log.js";
+import Task from "../models/Task.js";
+import User from "../models/User.js";
+import Project from "../models/Project.js";
+import Comment from "../models/Comment.js";
+import ActivityLog from "../models/ActivityLog.js";
+import Notification from "../models/Notification.js";
+import { sendEmail } from "../config/mailer.js";
 
-import jwt from "jsonwebtoken";
+// POST /task/createTask  — project_manager only
+export const createTask = async (req, res) => {
+  try {
+    const { project_id, title, description, status, assigned_to, due_date } = req.body;
 
-export const createTask = (req,res) => {
-    const data = {
-        project_id: req.body.project_id,
-        title: req.body.title,
-        description: req.body.description,
-        status: req.body.status,
-        assigned_to: req.body.assigned_to,
-        due_date: req.body.due_date,
-    }
-
-    const authHeader = req.headers.authorization;
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token,"secretkey");
-
-    if(decoded.role==="project_manager"){
-        task.createTask(data,(err,results)=>{
-            if(err){
-                return res.status(404).json({
-                    message: "Task can't be created...",
-                    error: err
-                })
-            }
-            activity_log.create(decoded.id,`Task Created name= ${data.title}`,(err,results)=>{
-                if(err){
-                    console.log("Log error:",err);
-                }
-            });
-            res.status(200).json({
-                message: `Task created...\n assigned to ${data.assigned_to} \n by : ${decoded.name} \n submission last date : ${data.due_date}`
-            })
-        })
-    }
-    else{
-        return res.status(404).json({
-            message: `No access for ${decoded.role}`
-        })
-    }
-}
-
-export const deleteTask = (req,res) => {
-
-    const authHeader = req.headers.authorization;
-    if(!authHeader){
-        return res.status(401).json({
-            message: "Authorization header missing"
-        });
-    }
-
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token,"secretkey");
-
-    if(decoded.role==="project_manager"){
-        const id= req.params.id;
-        task.deleteTask(id,(err,results)=>{
-            if(err){
-                return res.status(400).json({
-                    message: "Error deleting the task"
-                });
-            }
-            if(results.affectedRows === 0){
-                res.status(404).json({
-                    message: "Data not exists!!!"
-                });
-            }
-            activity_log.create(decoded.id,`Task Deleted id= ${id}`,(err,results)=>{
-                if(err){
-                    console.log("Log error:",err);
-                }
-            });
-            res.status(200).json({
-                message: "Deleted Successfully..."
-            });
-        })
-    }
-    else{
-        res.status(403).json({
-            message: `You dont have right as you are ${decoded.role}`
-        });
-    }
-}
-
-export const updateTask = (req,res) => {
-    const id= req.params.id;
-
-    const data = {
-        status: req.body.status,
-        assigned_to: req.body.assigned_to,
-        due_date: req.body.due_date
-    }
-
-    const authHeader = req.headers.authorization;
-    if(!authHeader){
-        return res.status(401).json({
-            message: "Authorization header missing"
-        });
-    }
-
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token,"secretkey");
-
-    User.find(data.assigned_to, (err,person) => {
-
-        if(err) {
-            res.status(404).json({
-                message: "Error finding the person to whom the task is assigned to!!!"
-            })
-        }
-    
-        if(decoded.role === "project_manager" || decoded.name == person[0].name ){
-            
-            task.updateTask( data, id, (err,result) => {
-                if(!data){
-                    return res.status(404).json({
-                        message: "Enter the updating data!!!"
-                    })
-                }
-
-                if(err){
-                    return res.status(404).json({
-                        message: "Error updating the task!!!",
-                        error: err
-                    })
-                }
-                activity_log.create(decoded.id,`Task Updated id= ${id}`,(err,results)=>{
-                    if(err){
-                        console.log("Log error:",err);
-                    }
-                });
-                res.status(200).json({
-                    message: `Data Updated for ${data.assigned_to} with id = ${person[0].id}`
-                })
-            })
-        }
-        else{
-            res.status(403).json({
-                message: "Access denied!!!"
-            })
-        }
-
+    const task = await Task.create({
+      project_id,
+      title,
+      description,
+      status: status || "pending",
+      assigned_to,
+      due_date,
     });
-}
 
-export const find = (req,res) => {
-    const id = req.params.id;
-    task.find(id, (err,result)=>{
-        if(err){
-            return res.status(404).json({
-                message: "Error fetching the required task!!!"
-            });
-        }
-        if(result.length == 0){
-            return res.status(404).json({
-                message: "No task found!!!"
-            });
-        }
-        res.status(200).json({
-            data: result
-        });
-    })
-}
+    await ActivityLog.create({
+      user_id: req.user.id,
+      action: `Task created: "${task.title}" in project id=${project_id}`,
+    });
+
+    // Notify assigned user
+    if (assigned_to) {
+      await Notification.create({
+        user_id: assigned_to,
+        task_id: task.id,
+        message: `You have been assigned a new task: "${title}"`,
+      });
+
+      // Send email to assigned user
+      const assignee = await User.findByPk(assigned_to);
+      if (assignee) {
+        await sendEmail(
+          assignee.email,
+          `New Task Assigned: ${title}`,
+          `<h3>Hi ${assignee.name},</h3>
+           <p>You have been assigned a new task by <b>${req.user.name}</b>.</p>
+           <p><b>Task:</b> ${title}</p>
+           <p><b>Description:</b> ${description || "N/A"}</p>
+           <p><b>Due Date:</b> ${due_date ? new Date(due_date).toDateString() : "Not set"}</p>
+           <p>Login to view details: <a href="http://localhost:5173">TaskFlowSpirit</a></p>`
+        );
+      }
+    }
+
+    return res.status(201).json({ message: "Task created successfully", taskId: task.id });
+  } catch (err) {
+    return res.status(500).json({ message: "Task could not be created", error: err.message });
+  }
+};
+
+// GET /task/getAllTasks  — all authenticated users
+export const getAllTasks = async (req, res) => {
+  try {
+    const where = {};
+    // members only see their own tasks
+    if (req.user.role === "member") where.assigned_to = req.user.id;
+
+    const tasks = await Task.findAll({
+      where,
+      include: [
+        { model: User, as: "assignee", attributes: ["id", "name", "email"] },
+        { model: Project, attributes: ["id", "project_name"] },
+      ],
+    });
+    return res.status(200).json({ message: "Tasks fetched successfully", data: tasks });
+  } catch (err) {
+    return res.status(500).json({ message: "Error fetching tasks", error: err.message });
+  }
+};
+
+// GET /task/find/:id
+export const find = async (req, res) => {
+  try {
+    const task = await Task.findByPk(req.params.id, {
+      include: [
+        { model: User, as: "assignee", attributes: ["id", "name", "email"] },
+        { model: Project, attributes: ["id", "project_name"] },
+        { model: Comment, include: [{ model: User, as: "author", attributes: ["id", "name"] }] },
+      ],
+    });
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    return res.status(200).json({ data: task });
+  } catch (err) {
+    return res.status(500).json({ message: "Error fetching task", error: err.message });
+  }
+};
+
+// GET /task/byProject/:project_id
+export const getTasksByProject = async (req, res) => {
+  try {
+    const tasks = await Task.findAll({
+      where: { project_id: req.params.project_id },
+      include: [{ model: User, as: "assignee", attributes: ["id", "name"] }],
+    });
+    return res.status(200).json({ data: tasks });
+  } catch (err) {
+    return res.status(500).json({ message: "Error fetching tasks", error: err.message });
+  }
+};
+
+// PUT /task/updateTask/:id  — project_manager OR assigned member
+export const updateTask = async (req, res) => {
+  try {
+    const task = await Task.findByPk(req.params.id);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+
+    const isManager = req.user.role === "project_manager" || req.user.role === "admin";
+    const isAssignee = task.assigned_to === req.user.id;
+
+    if (!isManager && !isAssignee) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const oldAssignee = task.assigned_to;
+    await task.update({
+      status: req.body.status ?? task.status,
+      assigned_to: req.body.assigned_to ?? task.assigned_to,
+      due_date: req.body.due_date ?? task.due_date,
+      title: req.body.title ?? task.title,
+      description: req.body.description ?? task.description,
+    });
+
+    await ActivityLog.create({
+      user_id: req.user.id,
+      action: `Task updated: "${task.title}" id=${task.id} status=${task.status}`,
+    });
+
+    // Notify if reassigned
+    if (req.body.assigned_to && req.body.assigned_to !== oldAssignee) {
+      await Notification.create({
+        user_id: req.body.assigned_to,
+        task_id: task.id,
+        message: `Task "${task.title}" has been reassigned to you.`,
+      });
+    }
+
+    // Notify if status changed
+    if (req.body.status && req.body.status !== task.status && task.assigned_to) {
+      await Notification.create({
+        user_id: task.assigned_to,
+        task_id: task.id,
+        message: `Task "${task.title}" status changed to ${req.body.status}.`,
+      });
+    }
+
+    return res.status(200).json({ message: "Task updated successfully" });
+  } catch (err) {
+    return res.status(500).json({ message: "Error updating task", error: err.message });
+  }
+};
+
+// DELETE /task/deleteTask/:id  — project_manager only
+export const deleteTask = async (req, res) => {
+  try {
+    const task = await Task.findByPk(req.params.id);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+
+    const taskTitle = task.title;
+    await task.destroy();
+
+    await ActivityLog.create({
+      user_id: req.user.id,
+      action: `Task deleted: "${taskTitle}" id=${req.params.id}`,
+    });
+
+    return res.status(200).json({ message: "Task deleted successfully" });
+  } catch (err) {
+    return res.status(500).json({ message: "Error deleting task", error: err.message });
+  }
+};
