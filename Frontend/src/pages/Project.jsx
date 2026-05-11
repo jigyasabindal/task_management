@@ -2,10 +2,83 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../AuthContext";
 import { Navigate, Link } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
-import { getAllProjects, createProject, deleteProject } from "../api/api";
-import { Trash2, FolderKanban, Plus, X } from "lucide-react";
+import { getAllProjects, createProject, updateProject, deleteProject } from "../api/api";
+import { Trash2, FolderKanban, Plus, X, Pencil } from "lucide-react";
 
-const ProjectCard = ({ project, onDelete, isAdmin }) => {
+// ── Edit Modal ────────────────────────────────────────────────────
+function EditProjectModal({ project, token, onSave, onClose }) {
+  const [form, setForm] = useState({
+    name: project.project_name || "",
+    description: project.description || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await updateProject(project.id, form, token);
+      onSave(project.id, form);
+    } catch (err) {
+      setError(err.message);
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 px-4">
+      <div className="bg-gray-800 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-white font-semibold text-lg">Edit Project</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
+            <X size={20} />
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/20 border border-red-500/40 rounded-xl text-red-300 text-sm">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSave} className="space-y-4">
+          <div>
+            <label className="text-sm text-gray-300 block mb-1">Project Name</label>
+            <input
+              type="text" required value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              className="w-full px-4 py-2.5 rounded-xl bg-gray-700 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="text-sm text-gray-300 block mb-1">Description</label>
+            <textarea
+              value={form.description}
+              onChange={e => setForm({ ...form, description: e.target.value })}
+              rows={3}
+              className="w-full px-4 py-2.5 rounded-xl bg-gray-700 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+            />
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl bg-gray-700 text-gray-300 hover:bg-gray-600 text-sm font-medium transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={saving}
+              className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Project Card ──────────────────────────────────────────────────
+const ProjectCard = ({ project, onDelete, onEdit, isAdmin }) => {
   const [deleting, setDeleting] = useState(false);
 
   const handleDelete = async () => {
@@ -33,26 +106,39 @@ const ProjectCard = ({ project, onDelete, isAdmin }) => {
             </p>
           </div>
         </div>
+
         {isAdmin && (
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="p-1.5 text-gray-600 hover:text-red-400 hover:bg-red-400/10 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-          >
-            <Trash2 size={14} />
-          </button>
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+            <button
+              onClick={() => onEdit(project)}
+              className="p-1.5 text-gray-400 hover:text-indigo-400 hover:bg-indigo-400/10 rounded-lg transition-colors"
+              title="Edit"
+            >
+              <Pencil size={14} />
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+              title="Delete"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
         )}
       </div>
+
       {project.description && (
         <p className="text-gray-400 text-sm mt-3 leading-relaxed line-clamp-2">
           {project.description}
         </p>
       )}
+
       <div className="mt-4 pt-3 border-t border-gray-700 flex items-center justify-between">
         <span className="text-gray-500 text-xs">
           {new Date(project.createdAt).toLocaleDateString()}
         </span>
-        <Link to={`/tasks`} className="text-indigo-400 hover:text-indigo-300 text-xs font-medium transition-colors">
+        <Link to="/tasks" className="text-indigo-400 hover:text-indigo-300 text-xs font-medium transition-colors">
           View Tasks →
         </Link>
       </div>
@@ -60,11 +146,13 @@ const ProjectCard = ({ project, onDelete, isAdmin }) => {
   );
 };
 
+// ── Main Page ─────────────────────────────────────────────────────
 export default function Project() {
   const { token, signin, role } = useAuth();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingProject, setEditingProject] = useState(null);
   const [form, setForm] = useState({ name: "", description: "" });
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
@@ -99,10 +187,33 @@ export default function Project() {
     setProjects(prev => prev.filter(p => p.id !== id));
   };
 
+  // Update the card in state immediately after save — no re-fetch needed
+  const handleEditSave = (id, updatedForm) => {
+    setProjects(prev =>
+      prev.map(p =>
+        p.id === id
+          ? { ...p, project_name: updatedForm.name, description: updatedForm.description }
+          : p
+      )
+    );
+    setEditingProject(null);
+  };
+
   return (
     <div className="flex min-h-screen bg-gray-900">
       <Sidebar />
       <main className="flex-1 p-8">
+
+        {/* Edit Modal — rendered at top level so it overlays everything */}
+        {editingProject && (
+          <EditProjectModal
+            project={editingProject}
+            token={token}
+            onSave={handleEditSave}
+            onClose={() => setEditingProject(null)}
+          />
+        )}
+
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-white">Projects</h1>
@@ -125,9 +236,7 @@ export default function Project() {
             {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
             <form onSubmit={handleCreate} className="space-y-3">
               <input
-                type="text"
-                required
-                placeholder="Project name"
+                type="text" required placeholder="Project name"
                 value={form.name}
                 onChange={e => setForm({ ...form, name: e.target.value })}
                 className="w-full px-4 py-2.5 rounded-xl bg-gray-700 border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -139,11 +248,8 @@ export default function Project() {
                 rows={3}
                 className="w-full px-4 py-2.5 rounded-xl bg-gray-700 border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
               />
-              <button
-                type="submit"
-                disabled={creating}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-medium transition-colors"
-              >
+              <button type="submit" disabled={creating}
+                className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-6 py-2.5 rounded-xl text-sm font-medium transition-colors">
                 {creating ? "Creating..." : "Create Project"}
               </button>
             </form>
@@ -159,6 +265,7 @@ export default function Project() {
                 key={p.id}
                 project={p}
                 onDelete={handleDelete}
+                onEdit={setEditingProject}
                 isAdmin={role === "admin"}
               />
             ))}
